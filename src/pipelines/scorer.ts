@@ -3,17 +3,17 @@ import { supabase } from '../db/supabase';
 import { scoreEventsWithAI } from '../api/chaingpt';
 
 export async function runScoringBatch(): Promise<boolean> {
-    console.log(`🧠 [Scorer] Fetching up to 35 events for AI evaluation...`);
+    console.log(`🧠 [Scorer] Fetching up to 25 events for AI evaluation...`);
     
     // Calculate timestamp for exactly 24 hours ago
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    // Fetch up to 35 events that have NO score OR haven't been scored in 24 hours
+    // Fetch up to 25 events that have NO score OR haven't been scored in 24 hours
     const { data: eventsToScore } = await supabase
         .from('indexed_events')
         .select('id, event_data')
         .or(`predictability_score.is.null,last_scored_at.lt.${twentyFourHoursAgo}`)
-        .limit(35); // Reduced from 50 to 35
+        .limit(25); // Reduced from 50 to 25
 
     if (!eventsToScore || eventsToScore.length === 0) {
         console.log(`✅ [Scorer] No events require scoring at this time.`);
