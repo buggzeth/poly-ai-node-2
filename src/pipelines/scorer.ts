@@ -2,42 +2,44 @@
 import { supabase } from '../db/supabase';
 import { scoreEventsWithAI } from '../api/chaingpt';
 
-// Returns true if it processed events, false if there are no more events to score
-export async function runScoringPipeline(): Promise<boolean> {
-    console.log(`\n🧠 Starting AI Scoring Pipeline...`);
+export async function runScoringBatch() {
+    console.log(`🧠 [Scorer] Fetching up to 25 events for AI evaluation...`);
     
-    // Fetch 25 events where the score is NULL
-    const { data: unscoredEvents } = await supabase
+    // Calculate timestamp for exactly 24 hours ago
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    // Fetch 25 events that have NO score OR haven't been scored in 24 hours
+    const { data: eventsToScore } = await supabase
         .from('indexed_events')
         .select('id, event_data')
-        .is('predictability_score', null)
+        .or(`predictability_score.is.null,last_scored_at.lt.${twentyFourHoursAgo}`)
         .limit(25);
 
-    if (!unscoredEvents || unscoredEvents.length === 0) {
-        console.log(`✅ All events currently have a predictability_score.`);
-        return false; 
+    if (!eventsToScore || eventsToScore.length === 0) {
+        console.log(`✅ [Scorer] No events require scoring at this time.`);
+        return; 
     }
 
-    const promptInput = unscoredEvents.reduce((acc, row) => {
+    const promptInput = eventsToScore.reduce((acc, row) => {
         acc[row.id] = { title: row.event_data.title };
         return acc;
     }, {} as Record<string, { title: string }>);
 
     const promptTemplate = `You are an expert forecasting AI... \n\nInput Events:\n${JSON.stringify(promptInput, null, 2)}`;
     
-    console.log(`🤖 Sending ${unscoredEvents.length} events to ChainGPT...`);
+    console.log(`🤖 [Scorer] Sending ${eventsToScore.length} events to ChainGPT...`);
     const scoredData = await scoreEventsWithAI(promptTemplate);
 
     for (const [id, result] of Object.entries(scoredData)) {
         if (result.score !== undefined) {
-            // Saves the score to the new DB column
             await supabase
                 .from('indexed_events')
-                .update({ predictability_score: result.score })
+                .update({ 
+                    predictability_score: result.score,
+                    last_scored_at: new Date().toISOString() // Set the fresh timestamp
+                })
                 .eq('id', id);
-            console.log(`📝 Saved Score: Event ${id} -> ${result.score}`);
+            console.log(`📝 [Scorer] Logged Score: Event ${id} -> ${result.score}`);
         }
     }
-    
-    return true; // Indicates we did work, and there might be more
 }
